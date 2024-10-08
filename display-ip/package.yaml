@@ -1,0 +1,11 @@
+dependencies:
+  pixel_display:
+    url: github.com/toitware/toit-pixel-display
+    version: ^2.8.0
+  ssd1306:
+    url: github.com/toitware/toit-ssd1306
+    version: ^2.0.1
+  http:
+    url: github.com/toitlang/pkg-http
+    version: ^2.7.2
+

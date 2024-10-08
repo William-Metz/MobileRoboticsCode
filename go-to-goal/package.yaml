@@ -1,0 +1,5 @@
+dependencies:
+  communication:
+    path: ../communication
+  display:
+    path: ../display
