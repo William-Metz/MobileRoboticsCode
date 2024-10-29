@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Heartbeat Test</title>
+
+    <link rel="stylesheet" href="uPlot.min.css">
+    <script src="uPlot.iife.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+
+    <style>
+        header,
+        main {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            width: 600px;
+        }
+
+        label,
+        input {
+            margin-bottom: 10px;
+        }
+
+        label {
+            font-weight: bold;
+        }
+
+        input {
+            padding: 5px;
+            font-size: 1em;
+        }
+
+        button {
+            padding: 10px;
+            font-size: 1em;
+            cursor: pointer;
+        }
+
+        #message-log {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            width: 100%;
+            white-space: pre-wrap;
+            overflow-y: auto;
+            height: 400px;
+        }
+
+        #data-plot {
+            background-color: white;
+        }
+
+        #heartbeat-checkbox {
+            margin-top: 0;
+        }
+
+        #heartbeat-output {
+            width: 5rem;
+            display: inline-block;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <header>
+        <h1>WebSocket Heartbeat Test</h1>
+    </header>
+
+    <main>
+        <form id="connectionForm">
+
+            <label for="ip-address">
+                IP Address
+                <input type="text" id="ip-address" name="ip-address" placeholder="xxx.xxx.xxx.xxx:xxx" minlength="9"
+                    maxlength="21" size="15" pattern="^(10|134|127|172|192)(\.\d{1,3}){3}:\d{1,5}$" required>
+            </label>
+
+            <label for="heartbeat">
+                Heartbeat Interval: <output id="heartbeat-output">0.8s</output>
+                <input type="range" id="heartbeat" name="heartbeat" min="0.1" max="5" step="0.1" value="0.8"
+                    oninput="this.previousElementSibling.value = `${this.value}s`">
+            </label>
+
+            <label for="heartbeat-checkbox">
+                <input type="checkbox" id="heartbeat-checkbox" name="heartbeat-checkbox" checked>
+                Send Heartbeats
+            </label>
+
+            <button id="submit-button" type="submit">Connect</button>
+
+            <button id="reset-button" type="button">Send Reset</button>
+
+            <button id="clear-button" type="button" disabled>Clear Plot</button>
+
+            <div id="data-plot"></div>
+
+            <div id="message-log">Ready to connect</div>
+        </form>
+
+    </main>
+
+    <script>
+
+        const formElement = document.getElementById('connectionForm');
+        const ipAddressInput = document.getElementById('ip-address');
+        const heartbeatIntervalRange = document.getElementById('heartbeat');
+        const heartbeatCheckbox = document.getElementById('heartbeat-checkbox');
+        const submitButton = document.getElementById('submit-button');
+        const resetButton = document.getElementById('reset-button');
+        const clearButton = document.getElementById('clear-button');
+        const messageLogDiv = document.getElementById('message-log');
+        const dataPlotDiv = document.getElementById('data-plot');
+
+        const linePlotOptions = {
+            // TODO: set y scale to fixed value (or let user specify it)
+            title: "Data From Microcontroller",
+            width: Math.min(window.innerWidth, 600),
+            height: 300,
+            cursor: { drag: { setScale: false, } },
+            select: { show: false },
+            scales: { x: { time: false }, y: { auto: false, range: [0, 1] } },
+            series: [
+                { label: "Index", },
+                { stroke: "blue", width: 2, }
+            ],
+        };
+
+        const scatterPlotOptions = {
+            title: "Position",
+            // mode: 2,
+            width: formElement.clientWidth,
+            height: formElement.clientWidth,
+            // legend: { live: false },
+            // hooks: ...
+            // scales: { x: { time: false, range: guardedRange }, y: { auto: false, range: [0, 1] } },
+            scales: { x: { time: false, range: [-5, 5] }, y: { time: false, range: [-5, 5] } },
+            series: [
+                {},
+                { stroke: "blue", width: 2, }
+            ]
+
+        }
+
+        let x = 1;
+        let data = [[0], [0]];
+        let chart = null;
+
+        let socket = null;
+        let heartbeatIntervalId = null;
+        let heartbeatIsEnabled = true;
+
+
+        function createPlot() {
+            // chart = new uPlot(linePlotOptions, data, dataPlotDiv);
+            chart = new uPlot(scatterPlotOptions, data, dataPlotDiv);
+            clearButton.disabled = false;
+        }
+
+        function deinit() {
+
+            if (socket !== null) {
+                socket.close();
+                socket = null;
+            }
+
+            if (heartbeatIntervalId !== null) {
+                clearInterval(heartbeatIntervalId);
+                heartbeatIntervalId = null;
+            }
+
+            messageLogDiv.insertAdjacentText('afterbegin', 'Ready to connect\n');
+
+            submitButton.innerHTML = 'Connect';
+            submitButton.disabled = false;
+
+            x = 1;
+            data = [[0], [0]];
+        }
+
+        heartbeatCheckbox.addEventListener('change', function () {
+            heartbeatIsEnabled = this.checked;
+        });
+
+        resetButton.addEventListener('click', function () {
+            if (socket !== null) {
+                socket.send('reset');
+            }
+        });
+
+        clearButton.addEventListener('click', function () {
+            if (chart !== null) {
+                data = [[0], [0]];
+                chart.setData(data);
+            }
+        });
+
+        formElement.addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            if (socket !== null) {
+                deinit();
+                return;
+            }
+
+            const ipAddress = ipAddressInput.value;
+            const heartbeatInterval = heartbeatIntervalRange.value * 1000;
+
+            heartbeatIsEnabled = heartbeatCheckbox.checked;
+
+            const address = `ws://${ipAddress}/`;
+
+            messageLogDiv.insertAdjacentText('afterbegin', 'Connecting...\n');
+            submitButton.innerHTML = 'Connecting...';
+            submitButton.disabled = true;
+
+            socket = new WebSocket(address);
+            // socket.onreconnect = () => { };
+
+            socket.onopen = () => {
+                messageLogDiv.insertAdjacentHTML('afterbegin', '<span style="color:green;">Connection opened</span><br>');
+                messageLogDiv.insertAdjacentText('afterbegin', 'Sending heartbeats\n');
+
+                submitButton.innerHTML = 'Disconnect';
+                submitButton.disabled = false;
+
+                // Send initial heartbeat
+                if (heartbeatIsEnabled) { socket.send('heartbeat'); }
+
+                // Send heartbeat at regular intervals
+                heartbeatIntervalId = setInterval(() => {
+                    if (heartbeatIsEnabled) { socket.send('heartbeat'); }
+                }, heartbeatInterval);
+            };
+
+            socket.onmessage = (event) => {
+                messageLogDiv.insertAdjacentText('afterbegin', `Message from server: ${event.data}\n`);
+
+                // Check if the message is a number that we can plot
+
+                let words = event.data.split(' ');
+                let values = {};
+
+                for (const word of words) {
+                    let namedPairs = word.split('=');
+
+                    if (namedPairs.length === 2) {
+                        let name = namedPairs[0];
+
+                        try {
+                            let value = parseFloat(namedPairs[1]);
+                            if (!isNaN(value)) {
+                                values[name] = value;
+                            }
+                        } catch (error) { }
+                    }
+                }
+
+                if ("x" in values && "y" in values) {
+                    data[0].push(values["x"]);
+                    data[1].push(values["y"]);
+                }
+
+                // let newY = 0;
+                // try { newY = parseFloat(event.data); }
+                // catch (error) { return; }
+
+                // if (isNaN(newY)) { return; }
+
+                // if (data[0].length >= 10) {
+                //     data[0].shift();
+                //     data[1].shift();
+                // }
+
+                // data[0].push(x++);
+                // data[1].push(newY);
+
+                if (chart === null) { createPlot(); }
+                chart.setData(data);
+            };
+
+            socket.onclose = () => {
+                console.log('closed');
+            };
+
+            socket.onerror = (error) => {
+                messageLogDiv.innerHTML = '<span style="color:red;">An unknown error occurred</span>';
+            };
+
+        });
+
+    </script>
+
+</body>
+
+</html>

@@ -34,9 +34,16 @@ class WsCommunicator {
   WebSocketsServer webSocket;
   WsHeartbeatState hbState;
 
+  bool resetFlag;
+
  public:
   WsCommunicator(const char* ssid, uint16_t port, unsigned long interval)
-      : heartbeatTimer(interval), ssid(ssid), port(port), webSocket(port), hbState(HEARTBEAT_DISABLED) {}
+      : heartbeatTimer(interval)
+      , ssid(ssid)
+      , port(port)
+      , webSocket(port)
+      , hbState(HEARTBEAT_DISABLED)
+      , resetFlag(false) {}
 
   void setup() {
     //
@@ -85,8 +92,17 @@ class WsCommunicator {
 
   bool isEnabled() { return hbState == HEARTBEAT_ENABLED; }
 
+  bool resetFlagIsSet() { return resetFlag; }
+  void clearResetFlag() { resetFlag = false; }
+
   String getIpAddress() { return WiFi.localIP().toString(); }
   uint16_t getPort() { return port; }
+
+  void sendText(const char message[], uint8_t length) {
+    for (uint8_t i = 0; i < webSocket.connectedClients(); i++) {
+      webSocket.sendTXT(i, message, length);
+    }
+  }
 };
 
 //
@@ -112,7 +128,8 @@ void wsEventCB(WsCommunicator& wsComm, uint8_t num, WStype_t type, uint8_t* payl
       if (strncmp((char*)payload, "heartbeat", length) == 0) {
         wsComm.hbState = HEARTBEAT_ENABLED;
         wsComm.heartbeatTimer.setLastTime(millis());
-        // Serial.printf("[COMMUNICATOR::%u] Heartbeat\n", num);
+      } else if (strncmp((char*)payload, "reset", length) == 0) {
+        wsComm.resetFlag = true;
       } else {
         Serial.printf("[COMMUNICATOR::%u] Received: %s\n", num, payload);
       }

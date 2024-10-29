@@ -34,6 +34,9 @@ float mapf(float value, float fromLo, float fromHi, float toLo, float toHi) {
   return (value - fromLo) * (toHi - toLo) / (fromHi - fromLo) + toLo;
 }
 
+// Check if a value is near zero
+bool isNearZero(float value, float epsilon = 0.01) { return abs(value) < epsilon; }
+
 typedef enum { DIRECTION_FORWARD = LOW, DIRECTION_BACKWARD = HIGH } MotorDirection;
 
 //  ▄    ▄        ▀▀█                    ▄▄▄                  ▄                  ▀▀█
@@ -103,7 +106,7 @@ class Encoder {
     encoder.clearCount();
 
     float rotation = (float)pulseCount / (float)COUNTS_PER_ROTATION;
-    float rotationsPerSecond = rotation / (float)elapsedTime;
+    float rotationsPerSecond = rotation / (float)(elapsedTime + 0.0001);
 
     return rotationsPerSecond;
   }
@@ -192,6 +195,7 @@ class MotorControl {
   float rightTargetVelocity;
   float maxVelocity;
   long minPwmPercent;
+  float maxStep;
   ProportionalAccumulatorController leftController;
   ProportionalAccumulatorController rightController;
   DualMotorDriver motorDriver;
@@ -205,6 +209,8 @@ class MotorControl {
   )
       : leftEncoder(LEFT_ENCODER_DATA_PIN, LEFT_ENCODER_CLOCK_PIN)
       , rightEncoder(RIGHT_ENCODER_DATA_PIN, RIGHT_ENCODER_CLOCK_PIN)
+      , leftMeasuredVelocity(0.0)
+      , rightMeasuredVelocity(0.0)
       , wheelCircumference(wheelCircumference)
       , leftTargetVelocity(0.0)
       , rightTargetVelocity(0.0)
@@ -212,6 +218,7 @@ class MotorControl {
       , minPwmPercent(minPwmPercent)
       , leftController(leftGain, maxStep, maxVelocity)
       , rightController(rightGain, maxStep, maxVelocity)
+      , maxStep(maxStep)
       , motorDriver()
       , updateTimer(interval) {}
 
@@ -234,6 +241,12 @@ class MotorControl {
 
       // If not enabled, then the motors were stopped above
       if (isEnabled) {
+        if (isNearZero(leftTargetVelocity) && isNearZero(rightTargetVelocity) && leftMeasuredVelocity < maxStep &&
+            rightMeasuredVelocity < maxStep) {
+          stop();
+          return;
+        }
+
         float leftControl = leftController.computeVelocity(leftTargetVelocity, leftMeasuredVelocity);
         long leftPwmPercent = mapf(abs(leftControl), 0, maxVelocity, minPwmPercent, 100);
         MotorDirection leftDirection = leftControl > 0 ? DIRECTION_FORWARD : DIRECTION_BACKWARD;
