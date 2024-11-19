@@ -8,7 +8,7 @@
 
 class Example {
   // Private variables and methods
-  // You can initialize plain-old-data (POD) inline
+  // You can initialize plain-old-data (POD) inline using default member initializer syntax
   int knownValue = 0;
   int userDefinedValue;
   LibraryObject libraryObject;
