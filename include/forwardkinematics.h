@@ -13,6 +13,9 @@ struct Pose {
     y = newY;
     theta = newTheta;
   }
+  void setTheta(float newTheta){
+      theta = newTheta;
+}
 };
 
 class ForwardKinematics {
@@ -46,7 +49,7 @@ class ForwardKinematics {
   }
 
   void setPose(float newX = 0, float newY = 0, float newTheta = 0) { pose.set(newX, newY, newTheta); }
-
+  void setTheta(float newTheta = 0) { pose.setTheta(newTheta); }
   Pose getPose() { return pose; }
 };
 
